@@ -1,28 +1,48 @@
-# Python 3 server example
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import time
+import imghdr
+import os
+from flask import Flask, render_template, request, redirect, url_for, abort, \
+    send_from_directory
+from werkzeug.utils import secure_filename
 
-hostName = "localhost"
-serverPort = 8080
+app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024
+app.config['UPLOAD_EXTENSIONS'] = ['.jpg', '.png', '.gif']
+app.config['UPLOAD_PATH'] = 'uploads/'
 
-class MyServer(BaseHTTPRequestHandler):
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header("Content-type", "text/html")
-        self.end_headers()
-        self.wfile.write(bytes("<html><head><title>fontRecog</title></head>", "utf-8"))
-        self.wfile.write(bytes("<body>", "utf-8"))
-        self.wfile.write(bytes("<p>Hi Rave, I set up a publically accessible python webserver where I am going to host the app for fontRecog.</p>", "utf-8"))
-        self.wfile.write(bytes("</body></html>", "utf-8"))
+def validate_image(stream):
+    header = stream.read(512)
+    stream.seek(0)
+    format = imghdr.what(None, header)
+    if not format:
+        return None
+    return '.' + (format if format != 'jpeg' else 'jpg')
 
-if __name__ == "__main__":        
-    webServer = HTTPServer((hostName, serverPort), MyServer)
-    print("Server started http://%s:%s" % (hostName, serverPort))
+@app.errorhandler(413)
+def too_large(e):
+    return "File is too large", 413
 
-    try:
-        webServer.serve_forever()
-    except KeyboardInterrupt:
-        pass
+@app.route('/')
+def index():
+    files = os.listdir(app.config['UPLOAD_PATH'])
+    return render_template('index.html', files=files)
+    
+@app.route('/directory')
+def get_files():
+    files = os.listdir(app.config['UPLOAD_PATH'])
+    return render_template('directory.html', files=files)
 
-    webServer.server_close()
-    print("Server stopped.")
+@app.route('/', methods=['POST'])
+def upload_files():
+    uploaded_file = request.files['file']
+    filename = secure_filename(uploaded_file.filename)
+    if filename != '':
+        file_ext = os.path.splitext(filename)[1]
+        if file_ext not in app.config['UPLOAD_EXTENSIONS'] or \
+                file_ext != validate_image(uploaded_file.stream):
+            return "Invalid image", 400
+        uploaded_file.save(os.path.join(app.config['UPLOAD_PATH'], filename))
+    return '', 204
+
+@app.route('/uploads/<filename>')
+def upload(filename):
+    return send_from_directory(app.config['UPLOAD_PATH'], filename)
